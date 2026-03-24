@@ -9,11 +9,13 @@ interface RoomProps {
   onReveal: () => void;
   onReset: () => void;
   onDelete: () => void;
+  onCalculationChange: (method: "average" | "sumByRole") => void;
+  onSelectManualMode: (role: string, vote: number) => void;
 }
 
 const VOTING_OPTIONS = Array.from({ length: 26 }, (_, i) => (i + 1) * 0.5);
 
-export function Room({ roomState, currentUser, onVote, onReveal, onReset, onDelete }: RoomProps) {
+export function Room({ roomState, currentUser, onVote, onReveal, onReset, onDelete, onCalculationChange, onSelectManualMode }: RoomProps) {
   const [copied, setCopied] = useState(false);
 
   if (!roomState) {
@@ -37,18 +39,52 @@ export function Room({ roomState, currentUser, onVote, onReveal, onReset, onDele
 
   const users = Object.values(roomState.users).filter(u => u.role !== "ScrumMaster");
   const isRevealed = roomState.status === "revealed";
+  const method = roomState.calculationMethod || "average";
+  const manualSelections = roomState.manualModeSelections || {};
 
-  // Calculate averages
-  const qaUsers = users.filter((u) => u.role === "QA" && u.vote !== null);
-  const devUsers = users.filter((u) => u.role === "Dev" && u.vote !== null);
+  // Helper to get vote distribution and modes
+  const getVoteStats = (votes: number[]) => {
+    if (votes.length === 0) return { distribution: {}, modes: [], autoMode: 0 };
+    const counts: Record<number, number> = {};
+    let maxCount = 0;
 
-  const qaAvg = qaUsers.length
-    ? qaUsers.reduce((sum, u) => sum + (u.vote || 0), 0) / qaUsers.length
-    : 0;
-  const devAvg = devUsers.length
-    ? devUsers.reduce((sum, u) => sum + (u.vote || 0), 0) / devUsers.length
-    : 0;
-  const totalSum = qaAvg + devAvg;
+    votes.forEach(v => {
+      counts[v] = (counts[v] || 0) + 1;
+      if (counts[v] > maxCount) {
+        maxCount = counts[v];
+      }
+    });
+
+    const modes = Object.keys(counts)
+      .map(Number)
+      .filter(v => counts[v] === maxCount);
+
+    return { 
+      distribution: counts, 
+      modes, 
+      autoMode: Math.max(...modes) // Default to highest if tie
+    };
+  };
+
+  // Calculate values
+  const qaVotes = users.filter((u) => u.role === "QA" && u.vote !== null).map(u => u.vote as number);
+  const devVotes = users.filter((u) => u.role === "Dev" && u.vote !== null).map(u => u.vote as number);
+
+  const qaStats = getVoteStats(qaVotes);
+  const devStats = getVoteStats(devVotes);
+
+  let qaResult = 0;
+  let devResult = 0;
+
+  if (method === "average") {
+    qaResult = qaVotes.length ? qaVotes.reduce((a, b) => a + b, 0) / qaVotes.length : 0;
+    devResult = devVotes.length ? devVotes.reduce((a, b) => a + b, 0) / devVotes.length : 0;
+  } else {
+    qaResult = manualSelections["QA"] !== undefined ? manualSelections["QA"] : qaStats.autoMode;
+    devResult = manualSelections["Dev"] !== undefined ? manualSelections["Dev"] : devStats.autoMode;
+  }
+
+  const totalSum = qaResult + devResult;
 
   return (
     <div className="space-y-6 sm:space-y-8">
@@ -58,10 +94,16 @@ export function Room({ roomState, currentUser, onVote, onReveal, onReset, onDele
           <h2 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
             {roomState.name}
           </h2>
-          <p className="text-slate-400 text-xs sm:text-sm mt-1 font-medium flex items-center justify-center sm:justify-start gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            {users.length} usuário{users.length !== 1 ? "s" : ""} online
-          </p>
+          <div className="flex items-center justify-center sm:justify-start gap-4 mt-1">
+            <p className="text-slate-400 text-xs sm:text-sm font-medium flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              {users.length} usuário{users.length !== 1 ? "s" : ""} online
+            </p>
+            <div className="h-4 w-[1px] bg-white/10"></div>
+            <p className="text-slate-400 text-xs sm:text-sm font-medium">
+              Método: <span className="text-cyan-400">{method === "average" ? "Média Simples" : "Mais Votado por Função"}</span>
+            </p>
+          </div>
         </div>
         <div className="flex w-full sm:w-auto gap-3">
           <button
@@ -73,6 +115,34 @@ export function Room({ roomState, currentUser, onVote, onReveal, onReset, onDele
           </button>
         </div>
       </div>
+
+      {/* Calculation Method Toggle (Scrum Master only) */}
+      {currentUser.role === "ScrumMaster" && (
+        <div className="flex justify-center">
+          <div className="bg-slate-900/80 p-1.5 rounded-2xl border border-white/10 flex gap-2">
+            <button
+              onClick={() => onCalculationChange("average")}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                method === "average" 
+                  ? "bg-cyan-500 text-white shadow-[0_0_15px_rgba(34,211,238,0.4)]" 
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              MÉDIA SIMPLES
+            </button>
+            <button
+              onClick={() => onCalculationChange("sumByRole")}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                method === "sumByRole" 
+                  ? "bg-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]" 
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              MAIS VOTADO POR FUNÇÃO
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Voting Options */}
       {!isRevealed && currentUser.role !== "ScrumMaster" && (
@@ -99,21 +169,98 @@ export function Room({ roomState, currentUser, onVote, onReveal, onReset, onDele
         </div>
       )}
 
-      {/* Averages */}
+      {/* Results */}
       {isRevealed && currentUser.role === "ScrumMaster" && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
-          <div className="bg-slate-900/50 p-4 sm:p-6 rounded-3xl border border-purple-500/30 backdrop-blur-sm shadow-[0_0_30px_-10px_rgba(168,85,247,0.2)] flex flex-col items-center justify-center relative overflow-hidden">
-            <span className="text-purple-400 font-bold uppercase tracking-widest text-[10px] sm:text-xs mb-1 sm:mb-2 relative z-10">Média QA</span>
-            <span className="text-3xl sm:text-5xl font-bold text-white relative z-10">{qaAvg > 0 ? qaAvg.toFixed(2) : "-"}</span>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+            <div className="bg-slate-900/50 p-4 sm:p-6 rounded-3xl border border-purple-500/30 backdrop-blur-sm shadow-[0_0_30px_-10px_rgba(168,85,247,0.2)] flex flex-col items-center justify-center relative overflow-hidden">
+              <span className="text-purple-400 font-bold uppercase tracking-widest text-[10px] sm:text-xs mb-1 sm:mb-2 relative z-10">
+                {method === "average" ? "Média QA" : "Resultado QA"}
+              </span>
+              <span className="text-3xl sm:text-5xl font-bold text-white relative z-10">{qaResult > 0 ? qaResult.toFixed(method === "average" ? 2 : 1) : "-"}</span>
+            </div>
+            <div className="bg-slate-900/50 p-4 sm:p-6 rounded-3xl border border-cyan-500/30 backdrop-blur-sm shadow-[0_0_30px_-10px_rgba(34,211,238,0.2)] flex flex-col items-center justify-center relative overflow-hidden">
+              <span className="text-cyan-400 font-bold uppercase tracking-widest text-[10px] sm:text-xs mb-1 sm:mb-2 relative z-10">
+                {method === "average" ? "Média Dev" : "Resultado Dev"}
+              </span>
+              <span className="text-3xl sm:text-5xl font-bold text-white relative z-10">{devResult > 0 ? devResult.toFixed(method === "average" ? 2 : 1) : "-"}</span>
+            </div>
+            <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-4 sm:p-6 rounded-3xl border border-indigo-500/50 shadow-[0_0_40px_-10px_rgba(99,102,241,0.4)] flex flex-col items-center justify-center relative overflow-hidden">
+              <span className="text-indigo-300 font-bold uppercase tracking-widest text-[10px] sm:text-xs mb-1 sm:mb-2 relative z-10">Soma Total</span>
+              <span className="text-3xl sm:text-5xl font-bold text-white relative z-10">{totalSum > 0 ? totalSum.toFixed(method === "average" ? 2 : 1) : "-"}</span>
+            </div>
           </div>
-          <div className="bg-slate-900/50 p-4 sm:p-6 rounded-3xl border border-cyan-500/30 backdrop-blur-sm shadow-[0_0_30px_-10px_rgba(34,211,238,0.2)] flex flex-col items-center justify-center relative overflow-hidden">
-            <span className="text-cyan-400 font-bold uppercase tracking-widest text-[10px] sm:text-xs mb-1 sm:mb-2 relative z-10">Média Dev</span>
-            <span className="text-3xl sm:text-5xl font-bold text-white relative z-10">{devAvg > 0 ? devAvg.toFixed(2) : "-"}</span>
-          </div>
-          <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-4 sm:p-6 rounded-3xl border border-indigo-500/50 shadow-[0_0_40px_-10px_rgba(99,102,241,0.4)] flex flex-col items-center justify-center relative overflow-hidden">
-            <span className="text-indigo-300 font-bold uppercase tracking-widest text-[10px] sm:text-xs mb-1 sm:mb-2 relative z-10">Soma Total</span>
-            <span className="text-3xl sm:text-5xl font-bold text-white relative z-10">{totalSum > 0 ? totalSum.toFixed(2) : "-"}</span>
-          </div>
+
+          {/* Tie Breaker / Distribution UI */}
+          {method === "sumByRole" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* QA Distribution */}
+              <div className="bg-slate-900/40 p-5 rounded-3xl border border-purple-500/20">
+                <h4 className="text-xs font-bold text-purple-400 uppercase tracking-widest mb-4">Distribuição de Votos QA</h4>
+                <div className="space-y-3">
+                  {Object.entries(qaStats.distribution).sort((a, b) => Number(b[0]) - Number(a[0])).map(([vote, count]) => {
+                    const isMode = qaStats.modes.includes(Number(vote));
+                    const isSelected = qaResult === Number(vote);
+                    return (
+                      <button
+                        key={vote}
+                        disabled={!isMode || qaStats.modes.length <= 1}
+                        onClick={() => onSelectManualMode("QA", Number(vote))}
+                        className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${
+                          isSelected 
+                            ? "bg-purple-500/20 border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.2)]" 
+                            : isMode 
+                              ? "bg-slate-800 border-purple-500/30 hover:border-purple-500/60" 
+                              : "bg-slate-950/50 border-white/5 opacity-60"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg font-black text-white">{vote}</span>
+                          {isMode && qaStats.modes.length > 1 && (
+                            <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-bold uppercase">Empate</span>
+                          )}
+                        </div>
+                        <span className="text-sm font-bold text-slate-400">{count} voto{count !== 1 ? "s" : ""}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Dev Distribution */}
+              <div className="bg-slate-900/40 p-5 rounded-3xl border border-cyan-500/20">
+                <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4">Distribuição de Votos Dev</h4>
+                <div className="space-y-3">
+                  {Object.entries(devStats.distribution).sort((a, b) => Number(b[0]) - Number(a[0])).map(([vote, count]) => {
+                    const isMode = devStats.modes.includes(Number(vote));
+                    const isSelected = devResult === Number(vote);
+                    return (
+                      <button
+                        key={vote}
+                        disabled={!isMode || devStats.modes.length <= 1}
+                        onClick={() => onSelectManualMode("Dev", Number(vote))}
+                        className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${
+                          isSelected 
+                            ? "bg-cyan-500/20 border-cyan-500 shadow-[0_0_15px_rgba(34,211,238,0.2)]" 
+                            : isMode 
+                              ? "bg-slate-800 border-cyan-500/30 hover:border-cyan-500/60" 
+                              : "bg-slate-950/50 border-white/5 opacity-60"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg font-black text-white">{vote}</span>
+                          {isMode && devStats.modes.length > 1 && (
+                            <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-bold uppercase">Empate</span>
+                          )}
+                        </div>
+                        <span className="text-sm font-bold text-slate-400">{count} voto{count !== 1 ? "s" : ""}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -132,10 +279,11 @@ export function Room({ roomState, currentUser, onVote, onReveal, onReset, onDele
                 <Trash2 size={16} />
                 EXCLUIR SALA
               </button>
+              
               {!isRevealed ? (
                 <button
                   onClick={onReveal}
-                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-xl font-bold transition-all text-xs sm:text-sm"
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-xl font-bold transition-all text-xs sm:text-sm shadow-[0_0_15px_rgba(34,211,238,0.3)]"
                 >
                   <Eye size={16} />
                   REVELAR VOTOS
@@ -143,7 +291,7 @@ export function Room({ roomState, currentUser, onVote, onReveal, onReset, onDele
               ) : (
                 <button
                   onClick={onReset}
-                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 text-white rounded-xl font-bold transition-all border border-white/10 text-xs sm:text-sm"
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition-all border border-white/10 text-xs sm:text-sm"
                 >
                   <RotateCcw size={16} />
                   REINICIAR

@@ -25,15 +25,13 @@ export default function App() {
 
   useEffect(() => {
     if (roomId && user && !socket) {
-      // Configuração otimizada para furar firewalls corporativos
-      // Se VITE_BACKEND_URL existir (ex: Vercel), usa ele. Senão, conecta no próprio domínio (undefined)
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || undefined;
-      
-      socket = io(backendUrl, {
-        transports: ["polling", "websocket"], // Tenta polling primeiro para furar firewalls
+      // Conecta automaticamente ao servidor que está servindo a página
+      // Isso funciona no AI Studio, Vercel, Render ou Localhost sem precisar de ajustes
+      socket = io({
+        transports: ["polling", "websocket"],
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
-        timeout: 60000 // 60 segundos para dar tempo do servidor gratuito do Render "acordar"
+        timeout: 60000
       });
 
       socket.on("connect_error", (err) => {
@@ -95,6 +93,18 @@ export default function App() {
     }
   };
 
+  const handleCalculationChange = (method: "average" | "sumByRole") => {
+    if (socket && roomId) {
+      socket.emit("change_calculation", { roomId, method });
+    }
+  };
+
+  const handleSelectManualMode = (role: string, vote: number) => {
+    if (socket && roomId) {
+      socket.emit("select_manual_mode", { roomId, role, vote });
+    }
+  };
+
   const handleDeleteRoom = () => {
     if (socket && roomId) {
       socket.emit("delete_room", { roomId });
@@ -142,6 +152,8 @@ export default function App() {
           onReveal={handleReveal}
           onReset={handleReset}
           onDelete={handleDeleteRoom}
+          onCalculationChange={handleCalculationChange}
+          onSelectManualMode={handleSelectManualMode}
         />
       )}
     </Layout>

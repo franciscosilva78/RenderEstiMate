@@ -16,6 +16,8 @@ interface Room {
   id: string;
   name: string;
   status: "voting" | "revealed";
+  calculationMethod: "average" | "sumByRole";
+  manualModeSelections: Record<string, number>;
   users: Record<string, User>;
 }
 
@@ -25,6 +27,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
   const server = http.createServer(app);
+
   const io = new SocketIOServer(server, {
     cors: {
       origin: "*",
@@ -44,7 +47,14 @@ async function startServer() {
 
     socket.on("join_room", ({ roomId, roomName, name, role }) => {
       if (!rooms[roomId]) {
-        rooms[roomId] = { id: roomId, name: roomName || "Planning Room", status: "voting", users: {} };
+        rooms[roomId] = { 
+          id: roomId, 
+          name: roomName || "Planning Room", 
+          status: "voting", 
+          calculationMethod: "average",
+          manualModeSelections: {},
+          users: {} 
+        };
       }
       
       const user: User = { id: socket.id, name, role, vote: null };
@@ -68,9 +78,24 @@ async function startServer() {
       }
     });
 
+    socket.on("change_calculation", ({ roomId, method }) => {
+      if (rooms[roomId]) {
+        rooms[roomId].calculationMethod = method;
+        io.to(roomId).emit("room_update", rooms[roomId]);
+      }
+    });
+
+    socket.on("select_manual_mode", ({ roomId, role, vote }) => {
+      if (rooms[roomId]) {
+        rooms[roomId].manualModeSelections[role] = vote;
+        io.to(roomId).emit("room_update", rooms[roomId]);
+      }
+    });
+
     socket.on("reset", ({ roomId }) => {
       if (rooms[roomId]) {
         rooms[roomId].status = "voting";
+        rooms[roomId].manualModeSelections = {};
         for (const userId in rooms[roomId].users) {
           rooms[roomId].users[userId].vote = null;
         }
